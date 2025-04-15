@@ -7,9 +7,9 @@ const adminSchema = require('../schemas/admin.schema');
 
 /**
  * @swagger
- * /api/admin/deleted-defects:
+ * /admin/deleted-defects:
  *   get:
- *     summary: Get all deleted defects
+ *     summary: Get all deleted defects (admin only)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
@@ -19,17 +19,17 @@ const adminSchema = require('../schemas/admin.schema');
  *       403:
  *         description: Admin access required
  */
-router.get('/deleted-defects', 
-    isAuthenticated, 
-    isAdmin, 
-    adminController.getDeletedDefects
+router.get('/deleted-defects',
+  isAuthenticated,
+  isAdmin,
+  adminController.getDeletedDefects
 );
 
 /**
  * @swagger
- * /api/admin/restore-defect/{id}:
+ * /admin/restore-defect/{id}:
  *   post:
- *     summary: Restore a deleted defect
+ *     summary: Restore a deleted defect (admin only)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
@@ -38,22 +38,24 @@ router.get('/deleted-defects',
  *         name: id
  *         required: true
  *         schema:
- *           type: string
+ *           type: integer
  *     responses:
  *       200:
  *         description: Defect restored successfully
  *       403:
  *         description: Admin access required
+ *       404:
+ *         description: Defect not found
  */
-router.post('/restore-defect/:id', 
-    isAuthenticated, 
-    isAdmin, 
-    adminController.restoreDefect
+router.post('/restore-defect/:id',
+  isAuthenticated,
+  isAdmin,
+  adminController.restoreDefect
 );
 
 /**
  * @swagger
- * /api/admin/export/audit-logs:
+ * /admin/export/audit-logs:
  *   get:
  *     summary: Export audit logs
  *     tags: [Admin]
@@ -65,12 +67,37 @@ router.post('/restore-defect/:id',
  *         schema:
  *           type: string
  *           enum: [csv, pdf]
- *         required: true
+ *         required: false
+ *         description: Export format (defaults to csv)
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date for filtering logs
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date for filtering logs
+ *       - in: query
+ *         name: actionTypes
+ *         schema:
+ *           type: array
+ *           items:
+ *             type: string
+ *         required: false
+ *         description: Types of actions to include
  *     responses:
  *       200:
  *         description: Audit logs exported successfully
  *       403:
  *         description: Admin access required
+ *       500:
+ *         description: Server error
  */
 router.get('/export/audit-logs', 
     isAuthenticated, 
@@ -81,7 +108,7 @@ router.get('/export/audit-logs',
 
 /**
  * @swagger
- * /api/admin/settings:
+ * /admin/settings:
  *   get:
  *     summary: Get admin settings
  *     tags: [Admin]
@@ -101,7 +128,7 @@ router.get('/settings',
 
 /**
  * @swagger
- * /api/admin/settings:
+ * /admin/settings:
  *   put:
  *     summary: Update admin settings
  *     tags: [Admin]
@@ -114,12 +141,26 @@ router.get('/settings',
  *           schema:
  *             type: object
  *             properties:
- *               emailNotifications:
- *                 type: boolean
- *               slackIntegration:
- *                 type: boolean
- *               alertOnCritical:
- *                 type: boolean
+ *               defaultDefectAssignment:
+ *                 type: string
+ *                 enum: [round_robin, load_balanced, manual]
+ *               maxDefectsPerUser:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 100
+ *               autoCloseAfterDays:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 365
+ *               notificationSettings:
+ *                 type: object
+ *                 properties:
+ *                   emailNotifications:
+ *                     type: boolean
+ *                   slackIntegration:
+ *                     type: boolean
+ *                   alertOnCritical:
+ *                     type: boolean
  *     responses:
  *       200:
  *         description: Settings updated successfully
@@ -134,6 +175,10 @@ router.put('/settings',
 );
 
 module.exports = router;
+
+
+
+
 
 
 

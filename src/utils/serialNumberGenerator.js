@@ -12,11 +12,15 @@ class SerialNumberGenerator {
 
     let sequence = 1;
     if (result) {
+      // Extract the sequence number from the last serial number
       const lastSequence = parseInt(result.serial_number.split('-')[2]);
       sequence = lastSequence + 1;
     }
 
-    return `BUG-${currentYear}-${sequence.toString().padStart(4, '0')}`;
+    // Format the sequence number to always have 4 digits (e.g., 0001, 0012, 0123)
+    const formattedSequence = sequence.toString().padStart(4, '0');
+    
+    return `BUG-${currentYear}-${formattedSequence}`;
   }
 }
 

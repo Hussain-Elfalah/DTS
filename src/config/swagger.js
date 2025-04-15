@@ -6,20 +6,21 @@ const options = {
     info: {
       title: 'Defect Tracker System API',
       version: '1.0.0',
-      description: 'API documentation for the Defect Tracking System',
-      contact: {
-        name: 'API Support',
-        email: 'support@example.com'
-      }
+      description: 'API documentation for the Defect Tracking System'
     },
     servers: [
       {
-        url: '/api',
+        url: '/api',  // Changed from '/' to '/api' to match the actual base path
         description: 'API server'
       }
     ],
     components: {
       securitySchemes: {
+        bearerAuth: {  // Added Bearer token auth
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT'
+        },
         cookieAuth: {
           type: 'apiKey',
           in: 'cookie',
@@ -114,10 +115,13 @@ const options = {
       }
     },
     security: [
+      { bearerAuth: [] },
       { cookieAuth: [] }
     ]
   },
-  apis: ['./src/routes/*.js'] // Path to the API routes
+  apis: ['./src/routes/*.js'], // Path to the API routes
 };
 
 module.exports = swaggerJsdoc(options);
+
+

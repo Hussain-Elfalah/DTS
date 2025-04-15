@@ -35,3 +35,7 @@ coverage/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Temporary files
+src/uploads/*
+!src/uploads/.gitkeep

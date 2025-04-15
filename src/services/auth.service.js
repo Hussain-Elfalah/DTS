@@ -37,7 +37,7 @@ class AuthService {
         // Only add audit log if there's a creator
         if (userData.created_by) {
           await trx('audit_logs').insert({
-            action: 'CREATE_USER',
+            type: 'CREATE_USER',
             entity_type: 'users',
             entity_id: user.id,
             user_id: userData.created_by,
@@ -125,6 +125,8 @@ class AuthService {
 }
 
 module.exports = new AuthService();
+
+
 
 
 

@@ -1,9 +1,10 @@
 const router = require('express').Router();
-const { isAuthenticated } = require('../middleware/auth.middleware');
+const { isAuthenticated, isAdmin } = require('../middleware/auth.middleware');
 const defectController = require('../controllers/defect.controller');
 const commentController = require('../controllers/comment.controller');
 const { validateRequest } = require('../middleware/validation.middleware');
 const defectSchema = require('../validations/defect.schema');
+const { z } = require('zod');
 
 /**
  * @swagger
@@ -164,6 +165,58 @@ router.get('/:id',
 
 /**
  * @swagger
+ * /defects/{id}:
+ *   put:
+ *     summary: Update a defect
+ *     tags: [Defects]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               severity:
+ *                 type: string
+ *                 enum: [low, medium, high, critical]
+ *               status:
+ *                 type: string
+ *                 enum: [open, in_progress, resolved, closed]
+ *               assignedTo:
+ *                 type: integer
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Defect updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Defect'
+ */
+router.put('/:id',
+  isAuthenticated,
+  validateRequest({ 
+    params: defectSchema.id,
+    body: defectSchema.update
+  }),
+  defectController.updateDefect
+);
+
+/**
+ * @swagger
  * /defects/{id}/comments:
  *   post:
  *     summary: Add a comment to a defect
@@ -213,19 +266,13 @@ router.get('/:id',
  */
 router.post('/:id/comments',
   isAuthenticated,
-  validateRequest(defectSchema.comment),
-  async (req, res) => {
-    try {
-      const comment = await commentController.createComment(
-        req.params.id,
-        req.user.id,
-        req.body.content
-      );
-      res.status(201).json({ comment });
-    } catch (error) {
-      res.status(500).json({ message: error.message });
-    }
-  }
+  validateRequest({
+    params: z.object({
+      id: z.string().regex(/^\d+$/).transform(Number)
+    }),
+    body: defectSchema.comment
+  }),
+  commentController.createComment  // Direct controller reference, no wrapper
 );
 
 /**
@@ -338,9 +385,179 @@ router.put('/:defectId/comments/:commentId',
   }
 );
 
+/**
+ * @swagger
+ * /defects/{id}/versions:
+ *   get:
+ *     summary: Get all versions of a defect
+ *     tags: [Defects]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Defect ID
+ *     responses:
+ *       200:
+ *         description: List of defect versions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     versions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                           defect_id:
+ *                             type: integer
+ *                           title:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *                           version_number:
+ *                             type: integer
+ *                           modified_by:
+ *                             type: integer
+ *                           modified_by_name:
+ *                             type: string
+ *                           created_at:
+ *                             type: string
+ *                             format: date-time
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
+router.get('/:id/versions',
+  isAuthenticated,
+  validateRequest({ params: defectSchema.id }),
+  defectController.getDefectVersions
+);
+
+/**
+ * @swagger
+ * /defects/{id}/versions/{versionNumber}:
+ *   get:
+ *     summary: Get a specific version of a defect
+ *     tags: [Defects]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Defect ID
+ *       - in: path
+ *         name: versionNumber
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Version number to retrieve
+ *     responses:
+ *       200:
+ *         description: Defect version details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     version:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                         defect_id:
+ *                           type: integer
+ *                         title:
+ *                           type: string
+ *                         description:
+ *                           type: string
+ *                         version_number:
+ *                           type: integer
+ *                         modified_by:
+ *                           type: integer
+ *                         modified_by_name:
+ *                           type: string
+ *                         created_at:
+ *                           type: string
+ *                           format: date-time
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
+router.get('/:id/versions/:versionNumber',
+  isAuthenticated,
+  validateRequest({
+    params: {
+      ...defectSchema.id,
+      versionNumber: z.string().regex(/^\d+$/).transform(Number)
+    }
+  }),
+  defectController.getDefectVersion
+);
+
+/**
+ * @swagger
+ * /defects/{id}:
+ *   delete:
+ *     summary: Soft delete a defect (admin only)
+ *     tags: [Defects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Defect ID
+ *     responses:
+ *       200:
+ *         description: Defect deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Defect deleted successfully
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Defect not found
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
+ */
+router.delete('/:id',
+  isAuthenticated,
+  isAdmin,
+  validateRequest({
+    params: defectSchema.id
+  }),
+  defectController.deleteDefect
+);
+
 module.exports = router;
-
-
-
-
 

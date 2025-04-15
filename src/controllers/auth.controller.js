@@ -1,5 +1,7 @@
 const authService = require('../services/auth.service');
+const auditService = require('../services/audit.service');
 const logger = require('../utils/logger');
+const { AUDIT_TYPES } = require('../constants/audit.types');
 
 class AuthController {
   async login(req, res) {
@@ -9,13 +11,23 @@ class AuthController {
       // Validate input
       if (!username || !password) {
         return res.status(400).json({ 
+          status: 'error',
           message: 'Username and password are required' 
         });
       }
 
       const user = await authService.validateUser(username, password);
+      
       if (!user) {
+        await auditService.createAuditLog({
+          type: AUDIT_TYPES.LOGIN_FAILURE,
+          userId: null,
+          entityType: 'users',
+          changes: { username }
+        });
+        
         return res.status(401).json({ 
+          status: 'error',
           message: 'Invalid credentials' 
         });
       }
@@ -23,11 +35,12 @@ class AuthController {
       // Check if user is active
       if (!user.is_active) {
         return res.status(403).json({ 
+          status: 'error',
           message: 'Account is disabled. Please contact administrator.' 
         });
       }
 
-      const { accessToken, refreshToken } = authService.generateTokens(user);
+      const { accessToken, refreshToken } = await authService.generateTokens(user);
 
       // Set cookies
       res.cookie('accessToken', accessToken, {
@@ -45,13 +58,15 @@ class AuthController {
         maxAge: 604800000 // 7 days
       });
 
-      // Log successful login
-      logger.info('User logged in successfully', {
+      await auditService.createAuditLog({
+        type: AUDIT_TYPES.LOGIN_SUCCESS,
         userId: user.id,
-        username: user.username
+        entityType: 'users',
+        entityId: user.id
       });
 
       return res.json({
+        status: 'success',
         message: 'Login successful',
         user: {
           id: user.id,
@@ -67,8 +82,9 @@ class AuthController {
         stack: error.stack,
         username: req.body.username
       });
-
-      return res.status(500).json({
+      
+      return res.status(500).json({ 
+        status: 'error',
         message: 'An error occurred during login',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
@@ -159,6 +175,9 @@ class AuthController {
 }
 
 module.exports = new AuthController();
+
+
+
 
 
 

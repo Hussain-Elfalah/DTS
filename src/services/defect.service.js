@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const logger = require('../utils/logger');
+const SerialNumberGenerator = require('../utils/serialNumberGenerator');
 
 class DefectService {
   async getDefects(query = {}) {
@@ -59,7 +60,7 @@ class DefectService {
         .leftJoin('users as creator', 'defects.created_by', 'creator.id')
         .leftJoin('users as assignee', 'defects.assigned_to', 'assignee.id')
         .where('defects.id', id)
-        .andWhere('defects.is_deleted', false)
+        .andWhere('defects.is_deleted', false)  // Check is_deleted flag
         .first();
 
       if (!defect) return null;
@@ -84,8 +85,286 @@ class DefectService {
       throw error;
     }
   }
+
+  async updateDefect(defectId, userId, updateData) {
+    const trx = await db.transaction();
+    
+    try {
+      // Get the current defect
+      const currentDefect = await db('defects')
+        .where('id', defectId)
+        .first();
+
+      if (!currentDefect) {
+        throw new Error('Defect not found');
+      }
+
+      // Get the latest version number
+      const latestVersion = await db('defect_versions')
+        .where('defect_id', defectId)
+        .max('version_number as max')
+        .first();
+
+      const newVersionNumber = (latestVersion.max || 0) + 1;
+
+      // Store the current version in defect_versions
+      await db('defect_versions').insert({
+        defect_id: defectId,
+        title: currentDefect.title,
+        description: currentDefect.description,
+        version_number: newVersionNumber,
+        modified_by: userId,
+        created_at: new Date(),
+        updated_at: new Date()
+      }).transacting(trx);
+
+      // Handle tags separately
+      const tags = updateData.tags;
+      delete updateData.tags;
+
+      // Update main defect data
+      const [updatedDefect] = await db('defects')
+        .where('id', defectId)
+        .update({
+          ...updateData,
+          updated_at: new Date()
+        })
+        .returning('*')
+        .transacting(trx);
+
+      // Update tags if they were provided
+      if (tags) {
+        // Delete existing tags
+        await db('defect_tags')
+          .where('defect_id', defectId)
+          .delete()
+          .transacting(trx);
+
+        // Insert new tags
+        if (tags.length > 0) {
+          const tagInserts = tags.map(tag => ({
+            defect_id: defectId,
+            tag: tag,
+            created_at: new Date(),
+            updated_at: new Date()
+          }));
+          
+          await db('defect_tags')
+            .insert(tagInserts)
+            .transacting(trx);
+        }
+      }
+
+      await trx.commit();
+      
+      // Return the updated defect with all related data
+      return await this.getDefectById(defectId);
+
+    } catch (error) {
+      await trx.rollback();
+      logger.error('Error in updateDefect:', error);
+      throw error;
+    }
+  }
+
+  async createDefect(defectData) {
+    const trx = await db.transaction();
+    
+    try {
+      // Generate serial number first
+      const serialNumber = await SerialNumberGenerator.generate();
+      
+      // Validate required fields
+      if (!defectData.title || !defectData.description || !defectData.severity || !defectData.created_by) {
+        throw new Error('Missing required fields');
+      }
+
+      // Insert the defect
+      const [defect] = await db('defects')
+        .insert({
+          serial_number: serialNumber,
+          title: defectData.title,
+          description: defectData.description,
+          severity: defectData.severity,
+          status: 'open',
+          assigned_to: defectData.assignedTo || null,
+          created_by: defectData.created_by,
+          created_at: new Date(),
+          updated_at: new Date(),
+          is_deleted: false
+        })
+        .returning('*')
+        .transacting(trx);
+
+      // If there are tags, insert them
+      if (defectData.tags && Array.isArray(defectData.tags) && defectData.tags.length > 0) {
+        const tagInserts = defectData.tags.map(tag => ({
+          defect_id: defect.id,
+          tag: tag,
+          created_at: new Date(),
+          updated_at: new Date()
+        }));
+        
+        await db('defect_tags')
+          .insert(tagInserts)
+          .transacting(trx);
+      }
+
+      // If there are attachments, insert them
+      if (defectData.attachments && Array.isArray(defectData.attachments) && defectData.attachments.length > 0) {
+        const attachmentInserts = defectData.attachments.map(url => ({
+          defect_id: defect.id,
+          url: url,
+          created_at: new Date(),
+          updated_at: new Date()
+        }));
+        
+        await db('defect_attachments')
+          .insert(attachmentInserts)
+          .transacting(trx);
+      }
+
+      await trx.commit();
+
+      // Return the created defect with additional info
+      const createdDefect = await this.getDefectById(defect.id);
+      return createdDefect;
+
+    } catch (error) {
+      await trx.rollback();
+      logger.error('Error in createDefect:', {
+        error: error.message,
+        stack: error.stack,
+        defectData
+      });
+      throw error;
+    }
+  }
+
+  async getDefectVersions(defectId) {
+    try {
+      const versions = await db('defect_versions')
+        .where('defect_id', defectId)
+        .select([
+          'defect_versions.*',
+          'users.username as modified_by_name'  // Changed from 'name' to 'username'
+        ])
+        .leftJoin('users', 'defect_versions.modified_by', 'users.id')
+        .orderBy('version_number', 'desc');
+
+      return versions;
+    } catch (error) {
+      logger.error('Error fetching defect versions:', error);
+      throw error;
+    }
+  }
+
+  async getDefectVersion(defectId, versionNumber) {
+    try {
+      const version = await db('defect_versions')
+        .where({
+          'defect_id': defectId,
+          'version_number': versionNumber
+        })
+        .select([
+          'defect_versions.*',
+          'users.username as modified_by_name'  // Changed from 'name' to 'username'
+        ])
+        .leftJoin('users', 'defect_versions.modified_by', 'users.id')
+        .first();
+
+      return version;
+    } catch (error) {
+      logger.error('Error fetching defect version:', error);
+      throw error;
+    }
+  }
+
+  async deleteDefect(defectId, userId) {
+    try {
+      const result = await db('defects')
+        .where('id', defectId)
+        .update({
+          is_deleted: true,
+          deleted_at: new Date(),
+          deleted_by: userId,
+          updated_at: new Date()
+        });
+      
+      return result > 0;
+    } catch (error) {
+      logger.error('Error in deleteDefect:', error);
+      throw error;
+    }
+  }
+
+  // Method to get deleted defects (for admin)
+  async getDeletedDefects() {
+    try {
+      const deletedDefects = await db('defects')
+        .select(
+          'defects.*',
+          'creator.username as creator_name',
+          'assignee.username as assignee_name',
+          'deleter.username as deleted_by_name'
+        )
+        .leftJoin('users as creator', 'defects.created_by', 'creator.id')
+        .leftJoin('users as assignee', 'defects.assigned_to', 'assignee.id')
+        .leftJoin('users as deleter', 'defects.deleted_by', 'deleter.id')
+        .where('defects.is_deleted', true)  // Check is_deleted flag
+        .orderBy('defects.deleted_at', 'desc');
+
+      logger.debug('Found deleted defects:', deletedDefects);
+      return deletedDefects;
+    } catch (error) {
+      logger.error('Error in getDeletedDefects:', error);
+      throw error;
+    }
+  }
+
+  // Method to restore a deleted defect (for admin)
+  async restoreDefect(defectId) {
+    try {
+      // First check if defect exists and is deleted
+      const defect = await db('defects')
+        .where({
+          'id': defectId,
+          'is_deleted': true
+        })
+        .first();
+
+      if (!defect) {
+        throw new Error('Defect not found or is not deleted');
+      }
+
+      // Perform the restore
+      const result = await db('defects')
+        .where('id', defectId)
+        .update({
+          is_deleted: false,
+          deleted_at: null,
+          deleted_by: null,
+          updated_at: new Date()
+        });
+
+      return result > 0;
+    } catch (error) {
+      logger.error('Error in restoreDefect:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new DefectService();
+
+
+
+
+
+
+
+
+
+
 
 

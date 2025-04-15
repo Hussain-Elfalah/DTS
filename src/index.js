@@ -16,7 +16,17 @@ const sessionMiddleware = require('./middleware/session.middleware');
 const app = express();
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  // Enable CSP but allow Swagger UI
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  }
+}));
 app.use(cors(config.security.cors));
 app.use(rateLimit(config.security.rateLimit));
 
@@ -31,15 +41,23 @@ app.use(sessionMiddleware);
 // Audit logging
 app.use(auditMiddleware);
 
-// Swagger documentation
+// Swagger documentation - place before API routes
 app.use('/api-docs', swaggerUi.serve);
-app.get('/api-docs', swaggerUi.setup(swaggerSpec));
+app.get('/api-docs', swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true
+  }
+}));
 
-// Routes
+// API Routes
+app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/users', require('./routes/user.routes'));
 app.use('/api/defects', require('./routes/defect.routes'));
-app.use('/api/admin', require('./routes/admin.routes'));
 
 // Error handling
 app.use(errorHandler);
@@ -50,5 +68,9 @@ app.listen(config.port, () => {
 });
 
 module.exports = app;
+
+
+
+
 
 

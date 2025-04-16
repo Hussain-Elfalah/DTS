@@ -67,18 +67,34 @@ class DefectService {
 
       // Get tags if they exist
       const tags = await db('defect_tags')
-        .select('tag')
-        .where('defect_id', id);
+        .join('tags', 'defect_tags.tag_id', 'tags.id')
+        .select('tags.id', 'tags.name', 'tags.color')
+        .where('defect_tags.defect_id', id);
 
       // Get attachments if they exist
       const attachments = await db('defect_attachments')
-        .select('url')
+        .select('id', 'filename', 'url', 'size', 'created_at')
         .where('defect_id', id);
+
+      // Get comments if they exist
+      const comments = await db('comments')
+        .join('users', 'comments.user_id', 'users.id')
+        .select(
+          'comments.id',
+          'comments.content',
+          'comments.created_at',
+          'comments.updated_at',
+          'users.username as author'
+        )
+        .where('comments.defect_id', id)
+        .andWhere('comments.is_deleted', false)
+        .orderBy('comments.created_at', 'desc');
 
       return {
         ...defect,
-        tags: tags.map(t => t.tag),
-        attachments: attachments.map(a => a.url)
+        tags,
+        attachments,
+        comments
       };
     } catch (error) {
       logger.error('Error in getDefectById:', error);
@@ -96,7 +112,8 @@ class DefectService {
         .first();
 
       if (!currentDefect) {
-        throw new Error('Defect not found');
+        await trx.rollback();
+        return null;
       }
 
       // Get the latest version number
@@ -133,25 +150,42 @@ class DefectService {
         .transacting(trx);
 
       // Update tags if they were provided
-      if (tags) {
-        // Delete existing tags
+      if (tags && Array.isArray(tags)) {
+        // Delete existing tag associations
         await db('defect_tags')
           .where('defect_id', defectId)
           .delete()
           .transacting(trx);
 
-        // Insert new tags
+        // Insert new tag associations
         if (tags.length > 0) {
-          const tagInserts = tags.map(tag => ({
-            defect_id: defectId,
-            tag: tag,
-            created_at: new Date(),
-            updated_at: new Date()
-          }));
-          
-          await db('defect_tags')
-            .insert(tagInserts)
+          // Get tag IDs for the provided tag names
+          const tagRecords = await db('tags')
+            .whereIn('name', tags)
+            .select('id', 'name')
             .transacting(trx);
+          
+          // Create a map of tag name to tag ID
+          const tagMap = tagRecords.reduce((map, tag) => {
+            map[tag.name] = tag.id;
+            return map;
+          }, {});
+          
+          // Create tag associations for valid tags
+          const validTags = tags.filter(tag => tagMap[tag]);
+          
+          if (validTags.length > 0) {
+            const tagInserts = validTags.map(tag => ({
+              defect_id: defectId,
+              tag_id: tagMap[tag],
+              created_at: new Date(),
+              updated_at: new Date()
+            }));
+            
+            await db('defect_tags')
+              .insert(tagInserts)
+              .transacting(trx);
+          }
         }
       }
 
@@ -179,6 +213,10 @@ class DefectService {
         throw new Error('Missing required fields');
       }
 
+      // Extract tags
+      const tags = defectData.tags || [];
+      delete defectData.tags;
+
       // Insert the defect
       const [defect] = await db('defects')
         .insert({
@@ -197,46 +235,41 @@ class DefectService {
         .transacting(trx);
 
       // If there are tags, insert them
-      if (defectData.tags && Array.isArray(defectData.tags) && defectData.tags.length > 0) {
-        const tagInserts = defectData.tags.map(tag => ({
-          defect_id: defect.id,
-          tag: tag,
-          created_at: new Date(),
-          updated_at: new Date()
-        }));
-        
-        await db('defect_tags')
-          .insert(tagInserts)
+      if (Array.isArray(tags) && tags.length > 0) {
+        // Get tag IDs for the provided tag names
+        const tagRecords = await db('tags')
+          .whereIn('name', tags)
+          .select('id', 'name')
           .transacting(trx);
-      }
-
-      // If there are attachments, insert them
-      if (defectData.attachments && Array.isArray(defectData.attachments) && defectData.attachments.length > 0) {
-        const attachmentInserts = defectData.attachments.map(url => ({
-          defect_id: defect.id,
-          url: url,
-          created_at: new Date(),
-          updated_at: new Date()
-        }));
         
-        await db('defect_attachments')
-          .insert(attachmentInserts)
-          .transacting(trx);
+        // Create a map of tag name to tag ID
+        const tagMap = tagRecords.reduce((map, tag) => {
+          map[tag.name] = tag.id;
+          return map;
+        }, {});
+        
+        // Create tag associations for valid tags
+        const validTags = tags.filter(tag => tagMap[tag]);
+        
+        if (validTags.length > 0) {
+          const tagInserts = validTags.map(tag => ({
+            defect_id: defect.id,
+            tag_id: tagMap[tag],
+            created_at: new Date(),
+            updated_at: new Date()
+          }));
+          
+          await db('defect_tags')
+            .insert(tagInserts)
+            .transacting(trx);
+        }
       }
 
       await trx.commit();
-
-      // Return the created defect with additional info
-      const createdDefect = await this.getDefectById(defect.id);
-      return createdDefect;
-
+      return defect;
     } catch (error) {
       await trx.rollback();
-      logger.error('Error in createDefect:', {
-        error: error.message,
-        stack: error.stack,
-        defectData
-      });
+      logger.error('Error in createDefect:', error);
       throw error;
     }
   }

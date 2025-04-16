@@ -3,8 +3,9 @@ const { isAuthenticated, isAdmin } = require('../middleware/auth.middleware');
 const defectController = require('../controllers/defect.controller');
 const commentController = require('../controllers/comment.controller');
 const { validateRequest } = require('../middleware/validation.middleware');
-const defectSchema = require('../validations/defect.schema');
-const { z } = require('zod');
+const defectSchema = require('../schemas/defect.schema');
+const commentSchema = require('../schemas/comment.schema');
+const z = require('zod');
 
 /**
  * @swagger
@@ -63,7 +64,11 @@ const { z } = require('zod');
  *                     perPage:
  *                       type: integer
  */
-router.get('/', isAuthenticated, defectController.getDefects);
+router.get('/', 
+  isAuthenticated, 
+  validateRequest(defectSchema.getDefects),
+  defectController.getDefects
+);
 
 /**
  * @swagger
@@ -119,7 +124,7 @@ router.get('/', isAuthenticated, defectController.getDefects);
  */
 router.post('/', 
   isAuthenticated, 
-  validateRequest(defectSchema.create),
+  validateRequest(defectSchema.createDefect),
   defectController.createDefect
 );
 
@@ -159,7 +164,7 @@ router.post('/',
  */
 router.get('/:id', 
   isAuthenticated,
-  validateRequest({ params: defectSchema.id }),
+  validateRequest(defectSchema.getDefectById),
   defectController.getDefectById
 );
 
@@ -208,16 +213,13 @@ router.get('/:id',
  */
 router.put('/:id',
   isAuthenticated,
-  validateRequest({ 
-    params: defectSchema.id,
-    body: defectSchema.update
-  }),
+  validateRequest(defectSchema.updateDefect),
   defectController.updateDefect
 );
 
 /**
  * @swagger
- * /defects/{id}/comments:
+ * /defects/{defectId}/comments:
  *   post:
  *     summary: Add a comment to a defect
  *     tags: [Comments]
@@ -264,15 +266,10 @@ router.put('/:id',
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/:id/comments',
+router.post('/:defectId/comments',
   isAuthenticated,
-  validateRequest({
-    params: z.object({
-      id: z.string().regex(/^\d+$/).transform(Number)
-    }),
-    body: defectSchema.comment
-  }),
-  commentController.createComment  // Direct controller reference, no wrapper
+  validateRequest(commentSchema.createComment),
+  commentController.createComment
 );
 
 /**
@@ -370,7 +367,7 @@ router.get('/:id/comments',
  */
 router.put('/:defectId/comments/:commentId',
   isAuthenticated,
-  validateRequest(defectSchema.comment),
+  validateRequest(commentSchema.update),
   async (req, res) => {
     try {
       const comment = await commentController.updateComment(
@@ -441,7 +438,7 @@ router.put('/:defectId/comments/:commentId',
  */
 router.get('/:id/versions',
   isAuthenticated,
-  validateRequest({ params: defectSchema.id }),
+  validateRequest(defectSchema.getDefectVersions),
   defectController.getDefectVersions
 );
 
@@ -507,8 +504,10 @@ router.get('/:id/versions/:versionNumber',
   isAuthenticated,
   validateRequest({
     params: {
-      ...defectSchema.id,
-      versionNumber: z.string().regex(/^\d+$/).transform(Number)
+      id: defectSchema.getDefectById.params.shape.id,
+      versionNumber: z.string().refine(val => !isNaN(parseInt(val)), {
+        message: 'Version number must be a number'
+      })
     }
   }),
   defectController.getDefectVersion
@@ -553,9 +552,7 @@ router.get('/:id/versions/:versionNumber',
 router.delete('/:id',
   isAuthenticated,
   isAdmin,
-  validateRequest({
-    params: defectSchema.id
-  }),
+  validateRequest(defectSchema.getDefectById),
   defectController.deleteDefect
 );
 
